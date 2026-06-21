@@ -1,0 +1,50 @@
+<div id="mascot">
+    <img src="assets/fila.png" alt="Fila">
+    <div id="mascot-name">Fila</div>
+</div>
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <title>Corkboard V2</title>
+    <link rel="stylesheet" href="style.css">
+</head>
+<body>
+
+    <div id="context-menu" class="menu">
+        <button id="menu-sticky">Add Sticky Note</button>
+
+        <hr>
+
+        <button id="menu-document">Add Document</button>
+        <button id="menu-evidence">Add Evidence Card</button>
+        <button id="menu-photo">Add Photo</button>
+        <button id="menu-tack">Add Loose Tack</button>
+
+        <hr>
+
+        <button id="menu-center">Center Camera</button>
+        <button id="menu-save-file">Save Board File</button>
+        <button id="menu-load-file">Load Board File</button>
+        <input id="board-file-input" type="file" accept=".corkboard,application/json" hidden>
+        <button id="menu-clear">Clear Board</button>
+
+        <input id="image-input" type="file" accept="image/png,image/jpeg,image/webp" hidden>
+    </div>
+
+    <div id="color-wheel"></div>
+
+    <div id="board">
+        <div id="world">
+            <svg id="yarn-layer"></svg>
+        </div>
+    </div>
+
+    <div id="tool-dock">
+        <button id="marker-tool" title="Marker">Marker</button>
+        <button id="eraser-tool" title="Eraser">Eraser</button>
+    </div>
+
+    <script src="app.js"></script>
+</body>
+</html>
