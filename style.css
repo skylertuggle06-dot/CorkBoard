@@ -30,7 +30,7 @@ body {
     transform-origin: 0 0;
 
     background-color: #7a4a25;
-    background-image: url("assets/cork.jpg");
+    background-image: url("cork.jpg");
     background-repeat: repeat;
     background-size: 512px 512px;
 }
