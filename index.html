@@ -1,24 +1,23 @@
-<div id="mascot">
-    <img src="fila.png" alt="Fila">
-    <div id="mascot-name">Fila</div>
-</div>
 <!DOCTYPE html>
 <html lang="en">
 <head>
     <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <title>Corkboard V2</title>
     <link rel="stylesheet" href="style.css">
 </head>
 <body>
 
+    <div id="search-bar">
+        <input id="board-search" placeholder="Search board...">
+    </div>
+
     <div id="context-menu" class="menu">
         <button id="menu-sticky">Add Sticky Note</button>
-
-        <hr>
-
         <button id="menu-document">Add Document</button>
         <button id="menu-evidence">Add Evidence Card</button>
         <button id="menu-photo">Add Photo</button>
+        <button id="menu-webclip">Add Web Clipping</button>
         <button id="menu-tack">Add Loose Tack</button>
 
         <hr>
@@ -26,10 +25,15 @@
         <button id="menu-center">Center Camera</button>
         <button id="menu-save-file">Save Board File</button>
         <button id="menu-load-file">Load Board File</button>
-        <input id="board-file-input" type="file" accept=".corkboard,application/json" hidden>
         <button id="menu-clear">Clear Board</button>
 
         <input id="image-input" type="file" accept="image/png,image/jpeg,image/webp" hidden>
+        <input id="board-file-input" type="file" accept=".corkboard,application/json" hidden>
+    </div>
+
+    <div id="string-menu" class="menu">
+        <button id="string-add-label">Add/Edit Label</button>
+        <button id="string-delete">Delete String</button>
     </div>
 
     <div id="color-wheel"></div>
@@ -40,9 +44,16 @@
         </div>
     </div>
 
+    <canvas id="minimap"></canvas>
+
     <div id="tool-dock">
         <button id="marker-tool" title="Marker">Marker</button>
         <button id="eraser-tool" title="Eraser">Eraser</button>
+    </div>
+
+    <div id="mascot">
+        <img src="fila.png" alt="Fila">
+        <div id="mascot-name">Fila</div>
     </div>
 
     <script src="app.js"></script>

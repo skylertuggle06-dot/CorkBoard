@@ -3,26 +3,35 @@ const world = document.getElementById("world");
 const yarnLayer = document.getElementById("yarn-layer");
 
 const contextMenu = document.getElementById("context-menu");
+const stringMenu = document.getElementById("string-menu");
 const colorWheel = document.getElementById("color-wheel");
 
 const menuSticky = document.getElementById("menu-sticky");
 const menuDocument = document.getElementById("menu-document");
 const menuEvidence = document.getElementById("menu-evidence");
 const menuPhoto = document.getElementById("menu-photo");
+const menuWebclip = document.getElementById("menu-webclip");
 const menuTack = document.getElementById("menu-tack");
 const menuCenter = document.getElementById("menu-center");
+const menuSaveFile = document.getElementById("menu-save-file");
+const menuLoadFile = document.getElementById("menu-load-file");
 const menuClear = document.getElementById("menu-clear");
 
+const stringAddLabel = document.getElementById("string-add-label");
+const stringDelete = document.getElementById("string-delete");
+
 const imageInput = document.getElementById("image-input");
+const boardFileInput = document.getElementById("board-file-input");
 
 const markerTool = document.getElementById("marker-tool");
 const eraserTool = document.getElementById("eraser-tool");
+const boardSearch = document.getElementById("board-search");
+
+const minimap = document.getElementById("minimap");
+const minimapCtx = minimap ? minimap.getContext("2d") : null;
 
 const STORAGE_KEY = "corkboardV2";
-
-const menuSaveFile = document.getElementById("menu-save-file");
-const menuLoadFile = document.getElementById("menu-load-file");
-const boardFileInput = document.getElementById("board-file-input");
+const WORLD_SIZE = 20000;
 
 let nextId = 1;
 
@@ -36,16 +45,13 @@ let spawnX = 10000;
 let spawnY = 10000;
 
 let yarns = [];
-
 let yarnStartTack = null;
 let activeYarn = null;
 let activeYarnPath = null;
+let selectedStringHit = null;
 
 let activeTwang = null;
 let audioContext = null;
-
-let lastPointerX = 0;
-let lastPointerY = 0;
 
 let isPanning = false;
 let panStart = { x: 0, y: 0 };
@@ -61,10 +67,13 @@ let isDrawing = false;
 let currentCanvas = null;
 let currentContext = null;
 let lastDrawPoint = null;
+let markerColor = "#ff0000";
 
 let selectedItems = new Set();
+let isSavingFile = false;
+let isAddingWebclip = false;
 
-let markerColor = "#ff0000";
+let lastBoardState = null;
 
 setup();
 loadBoard();
@@ -75,90 +84,70 @@ function setup() {
     setupCamera();
     setupYarnDrawing();
     setupDrawingTools();
+    setupSearch();
+    setupMinimap();
 }
 
 function setupMenus() {
     window.addEventListener("contextmenu", (e) => {
-    e.preventDefault();
+        e.preventDefault();
 
-    const clickedToolDock = e.target.closest("#tool-dock");
-    if (clickedToolDock) return;
+        if (e.target.closest("#tool-dock")) return;
 
-    menuSaveFile.addEventListener("click", () => {
-    hideContextMenu();
-    saveBoardToFile();
-    });
+        if (activeTool === "marker") {
+            hideContextMenu();
+            hideStringMenu();
 
-    menuLoadFile.addEventListener("click", () => {
-    hideContextMenu();
-    boardFileInput.click();
-    });
+            showColorWheel("marker", e.clientX, e.clientY, yarnColorOptions());
+            return;
+        }
 
-    boardFileInput.addEventListener("change", () => {
-    const file = boardFileInput.files[0];
-    if (!file) return;
+        const clickedTack = e.target.closest(".tack");
 
-    loadBoardFromFile(file);
-    boardFileInput.value = "";
-    });
-    
-    if (activeTool === "marker") {
-        hideContextMenu();
+        if (clickedTack) {
+            yarnStartTack = clickedTack;
 
-        showColorWheel("marker", e.clientX, e.clientY, [
-            { name: "red", value: "#ff0000" },
-            { name: "orange", value: "#ff8800" },
-            { name: "yellow", value: "#ffd400" },
-            { name: "green", value: "#00cc44" },
-            { name: "cyan", value: "#00d9ff" },
-            { name: "blue", value: "#0066ff" },
-            { name: "purple", value: "#9b4dff" },
-            { name: "black", value: "#000000" },
-            { name: "white", value: "#ffffff" }
-        ]);
+            hideContextMenu();
+            hideStringMenu();
 
-        return;
-    }
+            showColorWheel("yarn", e.clientX, e.clientY, yarnColorOptions());
+            return;
+        }
 
-    const clickedTack = e.target.closest(".tack");
+        if (!isNearAnyTack(e.clientX, e.clientY, 36)) {
+            const stringHit = findYarnSegmentNearScreenPoint(e.clientX, e.clientY, 24);
 
-    if (clickedTack) {
-        yarnStartTack = clickedTack;
-        hideContextMenu();
+            if (stringHit) {
+                selectedStringHit = stringHit;
+
+                hideContextMenu();
+                hideColorWheel();
+
+                showMenu(stringMenu, e.clientX, e.clientY);
+                return;
+            }
+        }
+
+        const clickedBoardArea =
+            e.target === board ||
+            e.target === world ||
+            e.target === yarnLayer ||
+            e.target.classList.contains("draw-layer") ||
+            e.target.closest(".board-item");
+
+        if (!clickedBoardArea) return;
+
+        const pos = screenToWorld(e.clientX, e.clientY);
+        spawnX = pos.x;
+        spawnY = pos.y;
+
         hideColorWheel();
-
-        showColorWheel("yarn", e.clientX, e.clientY, [
-            { name: "red", value: "#ff0000" },
-            { name: "orange", value: "#ff8800" },
-            { name: "yellow", value: "#ffd400" },
-            { name: "green", value: "#00cc44" },
-            { name: "cyan", value: "#00d9ff" },
-            { name: "blue", value: "#0066ff" },
-            { name: "purple", value: "#9b4dff" },
-            { name: "black", value: "#000000" },
-            { name: "white", value: "#ffffff" }
-        ]);
-
-        return;
-    }
-
-    const clickedBoardArea =
-        e.target === board ||
-        e.target === world ||
-        e.target === yarnLayer ||
-        e.target.classList.contains("draw-layer");
-
-    if (!clickedBoardArea && !e.target.closest(".board-item")) return;
-
-    const pos = screenToWorld(e.clientX, e.clientY);
-    spawnX = pos.x;
-    spawnY = pos.y;
-
-    hideColorWheel();
-    showMenu(contextMenu, e.clientX, e.clientY);
-});
+        hideStringMenu();
+        showMenu(contextMenu, e.clientX, e.clientY);
+    });
 
     menuSticky.addEventListener("click", (e) => {
+        e.preventDefault();
         e.stopPropagation();
 
         hideContextMenu();
@@ -176,38 +165,133 @@ function setupMenus() {
         ]);
     });
 
-    menuDocument.addEventListener("click", () => {
+    menuDocument.addEventListener("click", (e) => {
+        e.preventDefault();
+        e.stopPropagation();
         createDocument(spawnX, spawnY, "Untitled Document", "", true);
         hideContextMenu();
     });
 
-    menuEvidence.addEventListener("click", () => {
+    menuEvidence.addEventListener("click", (e) => {
+        e.preventDefault();
+        e.stopPropagation();
         createEvidence(spawnX, spawnY, "Evidence", "Unknown", "", true);
         hideContextMenu();
     });
 
-    menuTack.addEventListener("click", () => {
+    menuTack.addEventListener("click", (e) => {
+        e.preventDefault();
+        e.stopPropagation();
         createTack(spawnX, spawnY, true);
         hideContextMenu();
     });
 
-    menuPhoto.addEventListener("click", () => {
+    menuPhoto.addEventListener("click", (e) => {
+        e.preventDefault();
+        e.stopPropagation();
         hideContextMenu();
         imageInput.click();
     });
 
-    menuCenter.addEventListener("click", () => {
+    menuWebclip.addEventListener("click", (e) => {
+        e.preventDefault();
+        e.stopPropagation();
+
+        if (isAddingWebclip) return;
+        isAddingWebclip = true;
+
+        hideContextMenu();
+
+        const url = prompt("Paste web link:");
+
+        if (!url) {
+            isAddingWebclip = false;
+            return;
+        }
+
+        const clip = makeWebClipData(url);
+
+        createWebClip(
+            spawnX,
+            spawnY,
+            clip.title,
+            clip.url,
+            clip.image,
+            "",
+            true
+        );
+
+        saveBoard();
+
+        setTimeout(() => {
+            isAddingWebclip = false;
+        }, 300);
+    });
+
+    menuCenter.addEventListener("click", (e) => {
+        e.preventDefault();
+        e.stopPropagation();
         centerCamera();
         hideContextMenu();
         saveBoard();
     });
 
-    menuClear.addEventListener("click", () => {
+    menuSaveFile.addEventListener("click", (e) => {
+        e.preventDefault();
+        e.stopPropagation();
+        hideContextMenu();
+        saveBoardToFile();
+    });
+
+    menuLoadFile.addEventListener("click", (e) => {
+        e.preventDefault();
+        e.stopPropagation();
+        hideContextMenu();
+        boardFileInput.click();
+    });
+
+    menuClear.addEventListener("click", (e) => {
+        e.preventDefault();
+        e.stopPropagation();
         hideContextMenu();
 
         if (!confirm("Clear the whole board?")) return;
 
         clearBoard();
+    });
+
+    stringAddLabel.addEventListener("click", (e) => {
+        e.preventDefault();
+        e.stopPropagation();
+
+        if (!selectedStringHit) return;
+
+        const current = selectedStringHit.yarn.label?.text || "";
+        const text = prompt("String label:", current);
+
+        if (text !== null) {
+            setStringLabel(
+                selectedStringHit.yarn,
+                text.trim(),
+                selectedStringHit.segmentIndex,
+                selectedStringHit.t,
+                selectedStringHit.pathRatio
+            );
+
+            saveBoard();
+        }
+
+        hideStringMenu();
+    });
+
+    stringDelete.addEventListener("click", (e) => {
+        e.preventDefault();
+        e.stopPropagation();
+
+        if (!selectedStringHit) return;
+
+        deleteStringWithAnimation(selectedStringHit.yarn);
+        hideStringMenu();
     });
 
     imageInput.addEventListener("change", () => {
@@ -224,108 +308,53 @@ function setupMenus() {
         reader.readAsDataURL(file);
     });
 
-    document.addEventListener("click", (e) => {
-        if (!contextMenu.contains(e.target)) {
-            hideContextMenu();
-        }
+    boardFileInput.addEventListener("change", () => {
+        const file = boardFileInput.files[0];
+        if (!file) return;
 
-        if (!colorWheel.contains(e.target)) {
-            hideColorWheel();
-        }
+        loadBoardFromFile(file);
+        boardFileInput.value = "";
+    });
+
+    document.addEventListener("click", (e) => {
+        if (!contextMenu.contains(e.target)) hideContextMenu();
+        if (!colorWheel.contains(e.target)) hideColorWheel();
+        if (!stringMenu.contains(e.target)) hideStringMenu();
 
         if (
-        e.target === board ||
-        e.target === world ||
-        e.target === yarnLayer
-    ) {
-        clearSelection();
-    }
+            e.target === board ||
+            e.target === world ||
+            e.target === yarnLayer
+        ) {
+            clearSelection();
+        }
     });
+
+    document.addEventListener("keydown", (e) => {
+        if (
+            e.ctrlKey &&
+            e.key.toLowerCase() === "z" &&
+            !e.shiftKey
+        ) {
+            e.preventDefault();
+            undoLastAction();
+        }
+    });
+
 }
 
-function getBoardData() {
-    const items = [...document.querySelectorAll(".board-item")].map(item => {
-        const tack = document.querySelector(`.tack[data-attached-to="${item.dataset.id}"]`);
-
-        const base = {
-            id: item.dataset.id,
-            type: item.dataset.type,
-            x: item.offsetLeft,
-            y: item.offsetTop,
-            rotation: item.dataset.rotation,
-            tackId: tack ? tack.dataset.id : null,
-            drawing: item.querySelector(".draw-layer")?.toDataURL() || null
-        };
-
-        if (item.dataset.type === "note") {
-            base.color = item.dataset.color;
-            base.text = item.querySelector("textarea").value;
-        }
-
-        if (item.dataset.type === "document") {
-            base.title = item.querySelector(".document-title").value;
-            base.body = item.querySelector(".document-body").value;
-        }
-
-        if (item.dataset.type === "evidence") {
-            base.title = item.querySelector(".evidence-title").value;
-            base.tag = item.querySelector(".evidence-tag").value;
-            base.body = item.querySelector(".evidence-body").value;
-        }
-
-        if (item.dataset.type === "photo") {
-            base.src = item.querySelector("img").src;
-        }
-
-        return base;
-    });
-
-    const looseTacks = [...document.querySelectorAll(".tack")]
-        .filter(tack => !tack.dataset.attachedTo)
-        .map(tack => ({
-            id: tack.dataset.id,
-            x: tack.offsetLeft,
-            y: tack.offsetTop
-        }));
-
-    const savedYarns = yarns.map(yarn => ({
-        color: yarn.color,
-        tackIds: [...yarn.tackIds]
-    }));
-
-    return {
-        app: "Corkboard V2",
-        version: 1,
-        items,
-        looseTacks,
-        yarns: savedYarns,
-        nextId,
-        camera,
-        hasStarterNote: true
-    };
-}
-
-function saveBoardToFile() {
-    const data = getBoardData();
-    const json = JSON.stringify(data, null, 2);
-
-    const blob = new Blob([json], {
-        type: "application/json"
-    });
-
-    const url = URL.createObjectURL(blob);
-
-    const date = new Date().toISOString().slice(0, 10);
-
-    const link = document.createElement("a");
-    link.href = url;
-    link.download = `corkboard-${date}.corkboard`;
-
-    document.body.appendChild(link);
-    link.click();
-
-    link.remove();
-    URL.revokeObjectURL(url);
+function yarnColorOptions() {
+    return [
+        { name: "red", value: "#ff0000" },
+        { name: "orange", value: "#ff8800" },
+        { name: "yellow", value: "#ffd400" },
+        { name: "green", value: "#00cc44" },
+        { name: "cyan", value: "#00d9ff" },
+        { name: "blue", value: "#0066ff" },
+        { name: "purple", value: "#9b4dff" },
+        { name: "black", value: "#000000" },
+        { name: "white", value: "#ffffff" }
+    ];
 }
 
 function setupCamera() {
@@ -476,6 +505,7 @@ function handleTouchEnd() {
     lastTouchDistance = null;
     lastTouchMidpoint = null;
 }
+
 function createNote(x, y, text = "", color = "yellow", shouldSave = false, id = null, tackId = null, rotation = null, drawing = null) {
     const note = document.createElement("div");
 
@@ -587,24 +617,6 @@ function createEvidence(x, y, title = "Evidence", tag = "Unknown", body = "", sh
     return evidence;
 }
 
-function toggleItemSelection(item) {
-    if (selectedItems.has(item)) {
-        selectedItems.delete(item);
-        item.classList.remove("multi-selected");
-    } else {
-        selectedItems.add(item);
-        item.classList.add("multi-selected");
-    }
-}
-
-function clearSelection() {
-    selectedItems.forEach(item => {
-        item.classList.remove("multi-selected");
-    });
-
-    selectedItems.clear();
-}
-
 function createPhoto(x, y, src, shouldSave = false, id = null, tackId = null, rotation = null, drawing = null) {
     const photo = document.createElement("div");
 
@@ -630,6 +642,81 @@ function createPhoto(x, y, src, shouldSave = false, id = null, tackId = null, ro
     if (shouldSave) saveBoard();
 
     return photo;
+}
+
+function makeWebClipData(rawUrl) {
+    let url = rawUrl.trim();
+
+    if (!/^https?:\/\//i.test(url)) {
+        url = "https://" + url;
+    }
+
+    return {
+        title: getHostnameTitle(url),
+        url,
+        image: "blank.png"
+    };
+}
+
+function getHostnameTitle(url) {
+    try {
+        const hostname = new URL(url).hostname.replace(/^www\./, "");
+        return hostname.split(".")[0]
+            .replaceAll("-", " ")
+            .replace(/\b\w/g, char => char.toUpperCase());
+    } catch {
+        return "Web Clipping";
+    }
+}
+
+function createWebClip(x, y, title = "Web Clipping", url = "", image = "blank.png", notes = "", shouldSave = false, id = null, tackId = null, rotation = null, drawing = null) {
+    const clip = document.createElement("div");
+
+    clip.className = "board-item webclip";
+    clip.dataset.type = "webclip";
+    clip.dataset.id = id || getNewId();
+    clip.dataset.rotation = rotation ?? getRandomRotation();
+
+    clip.style.left = x + "px";
+    clip.style.top = y + "px";
+    clip.style.transform = `rotate(${clip.dataset.rotation}deg)`;
+
+    clip.innerHTML = `
+        <button class="delete-btn">×</button>
+        <img class="webclip-image" alt="Web preview" draggable="false">
+        <input class="webclip-title">
+        <a class="webclip-url" target="_blank" rel="noopener noreferrer"></a>
+        <textarea class="webclip-notes" placeholder="Notes..."></textarea>
+    `;
+
+    world.appendChild(clip);
+
+    const img = clip.querySelector(".webclip-image");
+    img.src = image || "blank.png";
+    img.onerror = () => {
+        img.onerror = null;
+        img.src = "blank.png";
+    };
+
+    const titleInput = clip.querySelector(".webclip-title");
+    titleInput.value = title;
+
+    const link = clip.querySelector(".webclip-url");
+    link.href = url;
+    link.textContent = url;
+
+    const notesBox = clip.querySelector(".webclip-notes");
+    notesBox.value = notes || "";
+
+    setupBoardItem(clip, tackId, 118, -16);
+    addDrawLayer(clip, drawing);
+
+    titleInput.addEventListener("input", saveBoard);
+    notesBox.addEventListener("input", saveBoard);
+
+    if (shouldSave) saveBoard();
+
+    return clip;
 }
 
 function setupBoardItem(item, tackId, tackOffsetX, tackOffsetY) {
@@ -702,9 +789,6 @@ function setupYarnDrawing() {
     window.addEventListener("pointermove", (e) => {
         if (!activeYarn) return;
 
-        lastPointerX = e.clientX;
-        lastPointerY = e.clientY;
-
         updateActiveYarnPreview(e.clientX, e.clientY);
         checkYarnWrap(e.clientX, e.clientY);
     });
@@ -758,7 +842,6 @@ function checkYarnWrap(screenX, screenY) {
         if (activeYarn.tackIds.includes(tack.dataset.id)) continue;
 
         const center = getTackCenter(tack);
-
         const distance = distanceFromPointToSegment(center, lastPoint, cursorPoint);
 
         if (distance <= 18) {
@@ -766,26 +849,6 @@ function checkYarnWrap(screenX, screenY) {
             return;
         }
     }
-}
-
-function distanceFromPointToSegment(point, a, b) {
-    const dx = b.x - a.x;
-    const dy = b.y - a.y;
-
-    if (dx === 0 && dy === 0) {
-        return Math.hypot(point.x - a.x, point.y - a.y);
-    }
-
-    const t =
-        ((point.x - a.x) * dx + (point.y - a.y) * dy) /
-        (dx * dx + dy * dy);
-
-    const clampedT = Math.max(0, Math.min(1, t));
-
-    const closestX = a.x + clampedT * dx;
-    const closestY = a.y + clampedT * dy;
-
-    return Math.hypot(point.x - closestX, point.y - closestY);
 }
 
 function lockYarnToTack(tack) {
@@ -800,6 +863,7 @@ function lockYarnToTack(tack) {
 
     renderActiveYarn();
 }
+
 function renderActiveYarn() {
     if (!activeYarn || !activeYarnPath) return;
 
@@ -818,7 +882,9 @@ function finishActiveYarn() {
     yarns.push({
         color: activeYarn.color,
         tackIds: [...activeYarn.tackIds],
-        path: finishedPath
+        path: finishedPath,
+        label: null,
+        labelElement: null
     });
 
     updateAllYarns();
@@ -843,17 +909,21 @@ function startYarnTwang(e) {
     if (activeYarn || activeTool) return;
     if (e.button !== 0) return;
 
-    const hit = findYarnSegmentNearScreenPoint(e.clientX, e.clientY, 18);
+    const hit = findYarnSegmentNearScreenPoint(e.clientX, e.clientY, 30);
 
     if (!hit) return;
 
     e.preventDefault();
     e.stopPropagation();
 
+    const basePoint = getYarnPointAtRatio(hit.yarn, hit.pathRatio);
+
     activeTwang = {
         yarn: hit.yarn,
         segmentIndex: hit.segmentIndex,
-        pullPoint: screenToWorld(e.clientX, e.clientY),
+        pathRatio: hit.pathRatio,
+        basePoint,
+        pullPoint: basePoint,
         releasePoint: null,
         frame: 0
     };
@@ -863,24 +933,15 @@ function startYarnTwang(e) {
 
 function moveYarnTwang(e) {
     if (!activeTwang) return;
-
-    const points = getYarnPoints(activeTwang.yarn);
-    const a = points[activeTwang.segmentIndex];
-    const b = points[activeTwang.segmentIndex + 1];
-
-    if (!a || !b) return;
+    if (activeTwang.releasePoint) return;
 
     const cursor = screenToWorld(e.clientX, e.clientY);
-
-    const mid = {
-        x: (a.x + b.x) / 2,
-        y: (a.y + b.y) / 2
-    };
+    const base = activeTwang.basePoint;
 
     const maxStretch = 180;
 
-    const dx = cursor.x - mid.x;
-    const dy = cursor.y - mid.y;
+    const dx = cursor.x - base.x;
+    const dy = cursor.y - base.y;
 
     const distance = Math.sqrt(dx * dx + dy * dy);
 
@@ -888,8 +949,8 @@ function moveYarnTwang(e) {
         const scale = maxStretch / distance;
 
         activeTwang.pullPoint = {
-            x: mid.x + dx * scale,
-            y: mid.y + dy * scale
+            x: base.x + dx * scale,
+            y: base.y + dy * scale
         };
     } else {
         activeTwang.pullPoint = cursor;
@@ -905,24 +966,14 @@ function releaseYarnTwang() {
     activeTwang.frame = 0;
 
     const points = getYarnPoints(activeTwang.yarn);
-
     const a = points[activeTwang.segmentIndex];
     const b = points[activeTwang.segmentIndex + 1];
 
     if (a && b) {
-        const segmentLength = Math.hypot(
-            b.x - a.x,
-            b.y - a.y
-        );
-
-        const mid = {
-            x: (a.x + b.x) / 2,
-            y: (a.y + b.y) / 2
-        };
-
+        const segmentLength = Math.hypot(b.x - a.x, b.y - a.y);
         const stretchAmount = Math.hypot(
-            activeTwang.releasePoint.x - mid.x,
-            activeTwang.releasePoint.y - mid.y
+            activeTwang.releasePoint.x - activeTwang.basePoint.x,
+            activeTwang.releasePoint.y - activeTwang.basePoint.y
         );
 
         playTwangSound(segmentLength, stretchAmount);
@@ -934,27 +985,20 @@ function releaseYarnTwang() {
 function animateYarnTwang() {
     if (!activeTwang) return;
 
-    const points = getYarnPoints(activeTwang.yarn);
-    const a = points[activeTwang.segmentIndex];
-    const b = points[activeTwang.segmentIndex + 1];
+    const base = activeTwang.basePoint;
 
-    if (!a || !b) {
+    if (!base) {
         activeTwang = null;
         updateAllYarns();
         return;
     }
 
-    const mid = {
-        x: (a.x + b.x) / 2,
-        y: (a.y + b.y) / 2
-    };
-
     const strength = Math.exp(-activeTwang.frame / 12);
     const wave = Math.cos(activeTwang.frame * 0.75) * strength;
 
     activeTwang.pullPoint = {
-        x: mid.x + (activeTwang.releasePoint.x - mid.x) * wave,
-        y: mid.y + (activeTwang.releasePoint.y - mid.y) * wave
+        x: base.x + (activeTwang.releasePoint.x - base.x) * wave,
+        y: base.y + (activeTwang.releasePoint.y - base.y) * wave
     };
 
     updateAllYarns();
@@ -982,32 +1026,9 @@ function updateAllYarns() {
             setYarnGroupPath(yarn.path, buildPolylinePath(points));
         }
     });
-}
 
-function findYarnSegmentNearScreenPoint(screenX, screenY, radius) {
-    const point = screenToWorld(screenX, screenY);
-
-    let closest = null;
-    let closestDistance = Infinity;
-
-    yarns.forEach(yarn => {
-        const points = getYarnPoints(yarn);
-
-        for (let i = 0; i < points.length - 1; i++) {
-            const distance = distanceFromPointToSegment(point, points[i], points[i + 1]);
-
-            if (distance < closestDistance && distance <= radius / camera.zoom) {
-                closestDistance = distance;
-
-                closest = {
-                    yarn,
-                    segmentIndex: i
-                };
-            }
-        }
-    });
-
-    return closest;
+    updateAllStringLabels();
+    updateMinimap();
 }
 
 function getYarnPoints(yarn) {
@@ -1015,45 +1036,6 @@ function getYarnPoints(yarn) {
         .map(id => document.querySelector(`.tack[data-id="${id}"]`))
         .filter(Boolean)
         .map(tack => getTackCenter(tack));
-}
-
-function buildPolylinePath(points) {
-    if (!points || points.length === 0) return "";
-
-    let d = `M ${points[0].x} ${points[0].y}`;
-
-    for (let i = 1; i < points.length; i++) {
-        const a = points[i - 1];
-        const b = points[i];
-
-        const midX = (a.x + b.x) / 2;
-        const midY = (a.y + b.y) / 2;
-
-        const dx = b.x - a.x;
-        const dy = b.y - a.y;
-
-        const distance = Math.sqrt(dx * dx + dy * dy);
-        const slack = Math.min(35, distance * 0.08);
-
-        const controlX = midX;
-        const controlY = midY + slack;
-
-        d += ` Q ${controlX} ${controlY} ${b.x} ${b.y}`;
-    }
-
-    return d;
-}
-
-function buildStraightPath(points) {
-    if (!points || points.length === 0) return "";
-
-    let d = `M ${points[0].x} ${points[0].y}`;
-
-    for (let i = 1; i < points.length; i++) {
-        d += ` L ${points[i].x} ${points[i].y}`;
-    }
-
-    return d;
 }
 
 function createYarnPath(color) {
@@ -1097,6 +1079,241 @@ function setYarnGroupPath(group, pathData) {
     group.shadowPath.setAttribute("d", pathData);
     group.mainPath.setAttribute("d", pathData);
     group.hatchPath.setAttribute("d", pathData);
+}
+
+function setStringLabel(yarn, text, segmentIndex, t, pathRatio = null) {
+    if (!text) {
+        if (yarn.labelElement) yarn.labelElement.remove();
+
+        yarn.label = null;
+        yarn.labelElement = null;
+        return;
+    }
+
+    yarn.label = {
+        text,
+        segmentIndex,
+        t,
+        pathRatio
+    };
+
+    if (!yarn.labelElement) {
+        yarn.labelElement = document.createElement("div");
+        yarn.labelElement.className = "string-label";
+        world.appendChild(yarn.labelElement);
+    }
+
+    yarn.labelElement.textContent = text;
+
+    updateStringLabel(yarn);
+}
+
+function updateStringLabel(yarn) {
+    if (!yarn.label || !yarn.labelElement || !yarn.path?.mainPath) return;
+
+    const path = yarn.path.mainPath;
+    const totalLength = path.getTotalLength();
+
+    const ratio = yarn.label.pathRatio ?? 0.5;
+    const length = totalLength * ratio;
+
+    const point = path.getPointAtLength(length);
+    const ahead = path.getPointAtLength(Math.min(totalLength, length + 3));
+    const behind = path.getPointAtLength(Math.max(0, length - 3));
+
+    const angle = Math.atan2(ahead.y - behind.y, ahead.x - behind.x);
+    const labelAngle = angle + Math.PI / 2;
+
+    yarn.labelElement.style.left = point.x + "px";
+    yarn.labelElement.style.top = point.y + "px";
+    yarn.labelElement.style.transform =
+        `translate(0, -50%) rotate(${labelAngle}rad)`;
+}
+
+function updateAllStringLabels() {
+    yarns.forEach(updateStringLabel);
+}
+
+function hideStringMenu() {
+    stringMenu.style.display = "none";
+    selectedStringHit = null;
+}
+
+function deleteStringWithAnimation(yarn) {
+    if (yarn.path) yarn.path.classList.add("string-cutting");
+    if (yarn.labelElement) yarn.labelElement.classList.add("string-cutting");
+
+    setTimeout(() => {
+        if (yarn.path) yarn.path.remove();
+        if (yarn.labelElement) yarn.labelElement.remove();
+
+        yarns = yarns.filter(existing => existing !== yarn);
+        saveBoard();
+        updateMinimap();
+    }, 300);
+}
+
+function buildPolylinePath(points) {
+    if (!points || points.length === 0) return "";
+
+    let d = `M ${points[0].x} ${points[0].y}`;
+
+    for (let i = 1; i < points.length; i++) {
+        const a = points[i - 1];
+        const b = points[i];
+
+        const midX = (a.x + b.x) / 2;
+        const midY = (a.y + b.y) / 2;
+
+        const dx = b.x - a.x;
+        const dy = b.y - a.y;
+
+        const distance = Math.sqrt(dx * dx + dy * dy);
+        const slack = Math.min(35, distance * 0.08);
+
+        const controlX = midX;
+        const controlY = midY + slack;
+
+        d += ` Q ${controlX} ${controlY} ${b.x} ${b.y}`;
+    }
+
+    return d;
+}
+
+function buildStraightPath(points) {
+    if (!points || points.length === 0) return "";
+
+    let d = `M ${points[0].x} ${points[0].y}`;
+
+    for (let i = 1; i < points.length; i++) {
+        d += ` L ${points[i].x} ${points[i].y}`;
+    }
+
+    return d;
+}
+
+function findYarnSegmentNearScreenPoint(screenX, screenY, radius) {
+    const point = screenToWorld(screenX, screenY);
+
+    let closest = null;
+    let closestDistance = Infinity;
+
+    yarns.forEach(yarn => {
+        if (!yarn.path?.mainPath) return;
+
+        const path = yarn.path.mainPath;
+        const totalLength = path.getTotalLength();
+        const step = 8;
+
+        for (let length = 0; length <= totalLength; length += step) {
+            const pathPoint = path.getPointAtLength(length);
+
+            const distance = Math.hypot(
+                point.x - pathPoint.x,
+                point.y - pathPoint.y
+            );
+
+            if (distance < closestDistance && distance <= radius / camera.zoom) {
+                const segmentInfo = getNearestStraightSegmentInfo(yarn, pathPoint);
+
+                closestDistance = distance;
+
+                closest = {
+                    yarn,
+                    segmentIndex: segmentInfo.segmentIndex,
+                    t: segmentInfo.t,
+                    pathRatio: totalLength === 0 ? 0 : length / totalLength
+                };
+            }
+        }
+    });
+
+    return closest;
+}
+
+function getNearestStraightSegmentInfo(yarn, point) {
+    const points = getYarnPoints(yarn);
+
+    let best = {
+        segmentIndex: 0,
+        t: 0
+    };
+
+    let bestDistance = Infinity;
+
+    for (let i = 0; i < points.length - 1; i++) {
+        const result = distanceAndTFromPointToSegment(
+            point,
+            points[i],
+            points[i + 1]
+        );
+
+        if (result.distance < bestDistance) {
+            bestDistance = result.distance;
+
+            best = {
+                segmentIndex: i,
+                t: result.t
+            };
+        }
+    }
+
+    return best;
+}
+
+function getYarnPointAtRatio(yarn, ratio) {
+    if (!yarn.path?.mainPath) return null;
+
+    const path = yarn.path.mainPath;
+    const totalLength = path.getTotalLength();
+
+    return path.getPointAtLength(totalLength * ratio);
+}
+
+function distanceFromPointToSegment(point, a, b) {
+    return distanceAndTFromPointToSegment(point, a, b).distance;
+}
+
+function distanceAndTFromPointToSegment(point, a, b) {
+    const dx = b.x - a.x;
+    const dy = b.y - a.y;
+
+    if (dx === 0 && dy === 0) {
+        return {
+            distance: Math.hypot(point.x - a.x, point.y - a.y),
+            t: 0
+        };
+    }
+
+    const rawT =
+        ((point.x - a.x) * dx + (point.y - a.y) * dy) /
+        (dx * dx + dy * dy);
+
+    const t = Math.max(0, Math.min(1, rawT));
+
+    const closestX = a.x + t * dx;
+    const closestY = a.y + t * dy;
+
+    return {
+        distance: Math.hypot(point.x - closestX, point.y - closestY),
+        t
+    };
+}
+
+function isNearAnyTack(screenX, screenY, radius) {
+    const tacks = [...document.querySelectorAll(".tack")];
+
+    return tacks.some(tack => {
+        const rect = tack.getBoundingClientRect();
+
+        const tackX = rect.left + rect.width / 2;
+        const tackY = rect.top + rect.height / 2;
+
+        const dx = screenX - tackX;
+        const dy = screenY - tackY;
+
+        return Math.hypot(dx, dy) <= radius;
+    });
 }
 
 function getAudioContext() {
@@ -1158,7 +1375,6 @@ function setActiveTool(tool) {
 
     document.body.classList.toggle("marker-active", tool === "marker");
     document.body.classList.toggle("eraser-active", tool === "eraser");
-    
 }
 
 function addDrawLayer(item, savedDrawing = null) {
@@ -1280,34 +1496,6 @@ function stopDrawing(e) {
     saveBoard();
 }
 
-function autoResizeTextarea(textarea) {
-    textarea.style.height = "auto";
-
-    const maxHeight = 360;
-    const newHeight = Math.min(textarea.scrollHeight, maxHeight);
-
-    textarea.style.height = newHeight + "px";
-
-    if (textarea.scrollHeight > maxHeight) {
-        textarea.style.overflowY = "auto";
-    } else {
-        textarea.style.overflowY = "hidden";
-    }
-}
-
-function clearAllTackSelections() {
-    document.querySelectorAll(".tack.selected").forEach(tack => {
-        tack.classList.remove("selected");
-    });
-}
-
-function getTackCenter(tack) {
-    return {
-        x: tack.offsetLeft + tack.offsetWidth / 2,
-        y: tack.offsetTop + tack.offsetHeight / 2
-    };
-}
-
 function makeDraggable(element, onMove) {
     let isDragging = false;
     let offsetX = 0;
@@ -1315,8 +1503,6 @@ function makeDraggable(element, onMove) {
 
     let lastX = 0;
     let lastY = 0;
-    let dragTilt = 0;
-
     let groupStartPositions = [];
 
     element.addEventListener("pointerdown", (e) => {
@@ -1330,23 +1516,6 @@ function makeDraggable(element, onMove) {
 
         if (e.ctrlKey || e.metaKey) {
             e.preventDefault();
-            if (activeTool === "marker") {
-             hideContextMenu();
-
-                showColorWheel("marker", e.clientX, e.clientY, [
-                { name: "red", value: "#ff0000" },
-                { name: "orange", value: "#ff8800" },
-                { name: "yellow", value: "#ffd400" },
-                { name: "green", value: "#00cc44" },
-                { name: "cyan", value: "#00d9ff" },
-                { name: "blue", value: "#0066ff" },
-                { name: "purple", value: "#9b4dff" },
-                { name: "black", value: "#000000" },
-                { name: "white", value: "#ffffff" }
-    ]);
-
-    return;
-}
             e.stopPropagation();
 
             toggleItemSelection(element);
@@ -1376,51 +1545,49 @@ function makeDraggable(element, onMove) {
 
         lastX = e.clientX;
         lastY = e.clientY;
-        dragTilt = 0;
         element.classList.add("dragging");
 
         element.setPointerCapture(e.pointerId);
     });
 
     element.addEventListener("pointermove", (e) => {
-    if (!isDragging) return;
+        if (!isDragging) return;
 
-    const worldPos = screenToWorld(e.clientX, e.clientY);
+        const worldPos = screenToWorld(e.clientX, e.clientY);
 
-    const newX = worldPos.x - offsetX;
-    const newY = worldPos.y - offsetY;
+        const newX = worldPos.x - offsetX;
+        const newY = worldPos.y - offsetY;
 
-    if (selectedItems.size > 0 && selectedItems.has(element)) {
-        const draggedStart = groupStartPositions.find(entry => entry.item === element);
+        if (selectedItems.size > 0 && selectedItems.has(element)) {
+            const draggedStart = groupStartPositions.find(entry => entry.item === element);
 
-        const moveX = newX - draggedStart.x;
-        const moveY = newY - draggedStart.y;
+            const moveX = newX - draggedStart.x;
+            const moveY = newY - draggedStart.y;
 
-        groupStartPositions.forEach(entry => {
-            entry.item.style.left = entry.x + moveX + "px";
-            entry.item.style.top = entry.y + moveY + "px";
+            groupStartPositions.forEach(entry => {
+                entry.item.style.left = entry.x + moveX + "px";
+                entry.item.style.top = entry.y + moveY + "px";
 
-            moveAttachedTacks(entry.item);
-        });
-    } else {
-        element.style.left = newX + "px";
-        element.style.top = newY + "px";
+                moveAttachedTacks(entry.item);
+            });
+        } else {
+            element.style.left = newX + "px";
+            element.style.top = newY + "px";
 
-        if (onMove) onMove();
-    }
+            if (onMove) onMove();
+        }
 
-    const dx = e.clientX - lastX;
+        const dx = e.clientX - lastX;
+        const dragTilt = Math.max(-8, Math.min(8, dx * 0.35));
+        const baseRotation = Number(element.dataset.rotation || 0);
 
-    dragTilt = Math.max(-8, Math.min(8, dx * 0.35));
+        element.style.transform = `rotate(${baseRotation + dragTilt}deg)`;
 
-    const baseRotation = Number(element.dataset.rotation || 0);
-    element.style.transform = `rotate(${baseRotation + dragTilt}deg)`;
+        lastX = e.clientX;
+        lastY = e.clientY;
 
-    lastX = e.clientX;
-    lastY = e.clientY;
-
-    updateAllYarns();
-});
+        updateAllYarns();
+    });
 
     element.addEventListener("pointerup", (e) => {
         if (!isDragging) return;
@@ -1450,6 +1617,24 @@ function makeDraggable(element, onMove) {
     });
 }
 
+function toggleItemSelection(item) {
+    if (selectedItems.has(item)) {
+        selectedItems.delete(item);
+        item.classList.remove("multi-selected");
+    } else {
+        selectedItems.add(item);
+        item.classList.add("multi-selected");
+    }
+}
+
+function clearSelection() {
+    selectedItems.forEach(item => {
+        item.classList.remove("multi-selected");
+    });
+
+    selectedItems.clear();
+}
+
 function deleteObject(element) {
     const id = element.dataset.id;
 
@@ -1459,13 +1644,116 @@ function deleteObject(element) {
     yarns = yarns.filter(yarn => {
         const connected = yarn.tackIds.includes(id);
 
-        if (connected) yarn.path.remove();
+        if (connected) {
+            if (yarn.path) yarn.path.remove();
+            if (yarn.labelElement) yarn.labelElement.remove();
+        }
 
         return !connected;
     });
 
+    selectedItems.delete(element);
     element.remove();
     saveBoard();
+    updateMinimap();
+}
+
+function autoResizeTextarea(textarea) {
+    textarea.style.height = "auto";
+
+    const maxHeight = 360;
+    const newHeight = Math.min(textarea.scrollHeight, maxHeight);
+
+    textarea.style.height = newHeight + "px";
+
+    if (textarea.scrollHeight > maxHeight) {
+        textarea.style.overflowY = "auto";
+    } else {
+        textarea.style.overflowY = "hidden";
+    }
+}
+
+function clearAllTackSelections() {
+    document.querySelectorAll(".tack.selected").forEach(tack => {
+        tack.classList.remove("selected");
+    });
+}
+
+function getTackCenter(tack) {
+    return {
+        x: tack.offsetLeft + tack.offsetWidth / 2,
+        y: tack.offsetTop + tack.offsetHeight / 2
+    };
+}
+
+function getBoardData() {
+    const items = [...document.querySelectorAll(".board-item")].map(item => {
+        const tack = document.querySelector(`.tack[data-attached-to="${item.dataset.id}"]`);
+
+        const base = {
+            id: item.dataset.id,
+            type: item.dataset.type,
+            x: item.offsetLeft,
+            y: item.offsetTop,
+            rotation: item.dataset.rotation,
+            tackId: tack ? tack.dataset.id : null,
+            drawing: item.querySelector(".draw-layer")?.toDataURL() || null
+        };
+
+        if (item.dataset.type === "note") {
+            base.color = item.dataset.color;
+            base.text = item.querySelector("textarea").value;
+        }
+
+        if (item.dataset.type === "document") {
+            base.title = item.querySelector(".document-title").value;
+            base.body = item.querySelector(".document-body").value;
+        }
+
+        if (item.dataset.type === "evidence") {
+            base.title = item.querySelector(".evidence-title").value;
+            base.tag = item.querySelector(".evidence-tag").value;
+            base.body = item.querySelector(".evidence-body").value;
+        }
+
+        if (item.dataset.type === "photo") {
+            base.src = item.querySelector("img").src;
+        }
+
+        if (item.dataset.type === "webclip") {
+            base.title = item.querySelector(".webclip-title").value;
+            base.url = item.querySelector(".webclip-url").href;
+            base.image = item.querySelector(".webclip-image").src;
+            base.notes = item.querySelector(".webclip-notes").value;
+        }
+
+        return base;
+    });
+
+    const looseTacks = [...document.querySelectorAll(".tack")]
+        .filter(tack => !tack.dataset.attachedTo)
+        .map(tack => ({
+            id: tack.dataset.id,
+            x: tack.offsetLeft,
+            y: tack.offsetTop
+        }));
+
+    const savedYarns = yarns.map(yarn => ({
+        color: yarn.color,
+        tackIds: [...yarn.tackIds],
+        label: yarn.label || null
+    }));
+
+    return {
+        app: "Corkboard V2",
+        version: 1,
+        items,
+        looseTacks,
+        yarns: savedYarns,
+        nextId,
+        camera,
+        hasStarterNote: true
+    };
 }
 
 function saveBoard() {
@@ -1474,6 +1762,63 @@ function saveBoard() {
     } catch (error) {
         console.warn("Save failed. Image or drawing may be too large.", error);
     }
+
+    updateMinimap();
+}
+
+function saveUndoState() {
+    try {
+        lastBoardState = JSON.stringify(getBoardData());
+    } catch (error) {
+        console.warn("Failed to create undo state.", error);
+    }
+}
+
+function undoLastAction() {
+    if (!lastBoardState) return;
+
+    try {
+        const data = JSON.parse(lastBoardState);
+
+        clearBoard(false);
+        loadBoardData(data);
+
+        saveBoard();
+
+        lastBoardState = null;
+    } catch (error) {
+        console.warn("Failed to undo action.", error);
+    }
+}
+
+function saveBoardToFile() {
+    if (isSavingFile) return;
+
+    isSavingFile = true;
+
+    const data = getBoardData();
+    const json = JSON.stringify(data, null, 2);
+
+    const blob = new Blob([json], {
+        type: "application/json"
+    });
+
+    const url = URL.createObjectURL(blob);
+    const date = new Date().toISOString().slice(0, 10);
+
+    const link = document.createElement("a");
+    link.href = url;
+    link.download = `corkboard-${date}.corkboard`;
+
+    document.body.appendChild(link);
+    link.click();
+
+    link.remove();
+    URL.revokeObjectURL(url);
+
+    setTimeout(() => {
+        isSavingFile = false;
+    }, 1000);
 }
 
 function loadBoard() {
@@ -1498,12 +1843,14 @@ function loadBoard() {
 }
 
 function loadBoardData(data) {
-    document.querySelectorAll(".board-item, .tack").forEach(el => el.remove());
+    document.querySelectorAll(".board-item, .tack, .string-label").forEach(el => el.remove());
 
     yarnLayer.innerHTML = "";
     yarns = [];
     activeYarn = null;
     activeYarnPath = null;
+    activeTwang = null;
+    clearSelection();
 
     if (!data.hasStarterNote) {
         data.items = data.items || [];
@@ -1542,6 +1889,10 @@ function loadBoardData(data) {
         if (item.type === "photo") {
             createPhoto(item.x, item.y, item.src, false, item.id, item.tackId, item.rotation, item.drawing);
         }
+
+        if (item.type === "webclip") {
+            createWebClip(item.x, item.y, item.title, item.url, item.image, item.notes, false, item.id, item.tackId, item.rotation, item.drawing);
+        }
     });
 
     data.looseTacks?.forEach(tack => {
@@ -1552,11 +1903,22 @@ function loadBoardData(data) {
         const path = createYarnPath(savedYarn.color);
         yarnLayer.appendChild(path);
 
-        yarns.push({
+        const yarn = {
             color: savedYarn.color,
             tackIds: savedYarn.tackIds,
-            path
-        });
+            path,
+            label: savedYarn.label || null,
+            labelElement: null
+        };
+
+        yarns.push(yarn);
+
+        if (yarn.label) {
+            yarn.labelElement = document.createElement("div");
+            yarn.labelElement.className = "string-label";
+            yarn.labelElement.textContent = yarn.label.text;
+            world.appendChild(yarn.labelElement);
+        }
     });
 
     updateAllYarns();
@@ -1577,8 +1939,7 @@ function loadBoardFromFile(file) {
             }
 
             loadBoardData(data);
-
-            localStorage.setItem(STORAGE_KEY, JSON.stringify(data));
+            localStorage.setItem(STORAGE_KEY, JSON.stringify(getBoardData()));
         } catch (error) {
             console.error(error);
             alert("Could not load this board file.");
@@ -1589,17 +1950,20 @@ function loadBoardFromFile(file) {
 }
 
 function clearBoard() {
-    document.querySelectorAll(".board-item, .tack").forEach(el => el.remove());
+    document.querySelectorAll(".board-item, .tack, .string-label").forEach(el => el.remove());
 
     yarnLayer.innerHTML = "";
     yarns = [];
     activeYarn = null;
     activeYarnPath = null;
+    activeTwang = null;
+    clearSelection();
 
     nextId = 1;
     centerCamera();
 
     localStorage.removeItem(STORAGE_KEY);
+    updateMinimap();
 }
 
 function centerCamera() {
@@ -1613,6 +1977,8 @@ function centerCamera() {
 function updateCamera() {
     world.style.transform =
         `translate(${camera.x}px, ${camera.y}px) scale(${camera.zoom})`;
+
+    updateMinimap();
 }
 
 function zoomAtPoint(screenX, screenY, zoomFactor, shouldSave = true) {
@@ -1639,12 +2005,278 @@ function screenToWorld(screenX, screenY) {
     };
 }
 
+function setupSearch() {
+    if (!boardSearch) return;
+
+    boardSearch.addEventListener("input", () => {
+        applySearch(boardSearch.value);
+    });
+}
+
+function applySearch(query) {
+    const search = query.trim().toLowerCase();
+
+    clearSearchVisuals();
+
+    if (!search) return;
+
+    document.querySelectorAll(".board-item").forEach(item => {
+        const text = getItemSearchText(item);
+
+        if (text.includes(search)) {
+            item.classList.add("search-match");
+        } else {
+            item.classList.add("search-dim");
+        }
+    });
+
+    yarns.forEach(yarn => {
+        const labelText = yarn.label?.text?.toLowerCase() || "";
+
+        if (labelText.includes(search)) {
+            if (yarn.labelElement) {
+                yarn.labelElement.classList.add("search-label-match");
+            }
+        } else {
+            if (yarn.path) yarn.path.classList.add("search-dim");
+            if (yarn.labelElement) yarn.labelElement.classList.add("search-dim");
+        }
+    });
+}
+
+function clearSearchVisuals() {
+    document.querySelectorAll(".search-dim").forEach(el => el.classList.remove("search-dim"));
+    document.querySelectorAll(".search-match").forEach(el => el.classList.remove("search-match"));
+    document.querySelectorAll(".search-label-match").forEach(el => el.classList.remove("search-label-match"));
+}
+
+function getItemSearchText(item) {
+    let text = "";
+
+    if (item.dataset.type === "note") {
+        text += item.querySelector("textarea")?.value || "";
+    }
+
+    if (item.dataset.type === "document") {
+        text += " " + (item.querySelector(".document-title")?.value || "");
+        text += " " + (item.querySelector(".document-body")?.value || "");
+    }
+
+    if (item.dataset.type === "evidence") {
+        text += " " + (item.querySelector(".evidence-title")?.value || "");
+        text += " " + (item.querySelector(".evidence-tag")?.value || "");
+        text += " " + (item.querySelector(".evidence-body")?.value || "");
+    }
+
+    if (item.dataset.type === "photo") {
+        text += " photo image";
+    }
+
+    if (item.dataset.type === "webclip") {
+        text += " " + (item.querySelector(".webclip-title")?.value || "");
+        text += " " + (item.querySelector(".webclip-url")?.textContent || "");
+        text += " " + (item.querySelector(".webclip-notes")?.value || "");
+    }
+
+    return text.toLowerCase();
+}
+
+function setupMinimap() {
+    if (!minimap || !minimapCtx) return;
+
+    minimap.width = 190;
+    minimap.height = 190;
+
+    minimap.addEventListener("click", (e) => {
+        const rect = minimap.getBoundingClientRect();
+
+        const mx = (e.clientX - rect.left) * (minimap.width / rect.width);
+        const my = (e.clientY - rect.top) * (minimap.height / rect.height);
+
+        const worldPos = minimapToWorld(mx, my);
+
+        camera.x = window.innerWidth / 2 - worldPos.x * camera.zoom;
+        camera.y = window.innerHeight / 2 - worldPos.y * camera.zoom;
+
+        updateCamera();
+        saveBoard();
+    });
+
+    updateMinimap();
+}
+
+function updateMinimap() {
+    if (!minimap || !minimapCtx) return;
+
+    minimapCtx.clearRect(0, 0, minimap.width, minimap.height);
+
+    minimapCtx.fillStyle = "rgba(20,20,20,0.6)";
+    minimapCtx.fillRect(0, 0, minimap.width, minimap.height);
+
+    drawMinimapGrid();
+
+    minimapCtx.globalAlpha = 0.65;
+    drawMinimapYarns();
+    drawMinimapItems();
+    minimapCtx.globalAlpha = 1;
+
+    drawMinimapCamera();
+}
+
+function drawMinimapGrid() {
+    minimapCtx.strokeStyle = "rgba(255,255,255,0.08)";
+    minimapCtx.lineWidth = 1;
+
+    for (let i = 0; i <= minimap.width; i += 38) {
+        minimapCtx.beginPath();
+        minimapCtx.moveTo(i, 0);
+        minimapCtx.lineTo(i, minimap.height);
+        minimapCtx.stroke();
+
+        minimapCtx.beginPath();
+        minimapCtx.moveTo(0, i);
+        minimapCtx.lineTo(minimap.width, i);
+        minimapCtx.stroke();
+    }
+}
+
+function drawMinimapYarns() {
+    yarns.forEach(yarn => {
+        const points = getYarnPoints(yarn);
+        if (points.length < 2) return;
+
+        minimapCtx.strokeStyle = yarn.color || "#ff0000";
+        minimapCtx.lineWidth = 1.5;
+        minimapCtx.beginPath();
+
+        points.forEach((point, index) => {
+            const mini = worldToMinimap(point.x, point.y);
+
+            if (index === 0) {
+                minimapCtx.moveTo(mini.x, mini.y);
+            } else {
+                minimapCtx.lineTo(mini.x, mini.y);
+            }
+        });
+
+        minimapCtx.stroke();
+    });
+}
+
+function drawMinimapItems() {
+    document.querySelectorAll(".board-item").forEach(item => {
+        const mini = worldToMinimap(
+            item.offsetLeft + item.offsetWidth / 2,
+            item.offsetTop + item.offsetHeight / 2
+        );
+
+        if (item.dataset.type === "note") {
+            minimapCtx.fillStyle = "#fff799";
+            minimapCtx.fillRect(mini.x - 4, mini.y - 4, 8, 8);
+        }
+
+        if (item.dataset.type === "document") {
+            minimapCtx.fillStyle = "#eeeeee";
+            minimapCtx.fillRect(mini.x - 4, mini.y - 5, 8, 10);
+        }
+
+        if (item.dataset.type === "evidence") {
+            minimapCtx.fillStyle = "#ff6b6b";
+            minimapCtx.fillRect(mini.x - 5, mini.y - 3, 10, 6);
+        }
+
+        if (item.dataset.type === "photo") {
+            drawMinimapPolaroid(mini.x, mini.y);
+        }
+
+        if (item.dataset.type === "webclip") {
+            minimapCtx.fillStyle = "#f3ead8";
+            minimapCtx.fillRect(mini.x - 5, mini.y - 5, 10, 10);
+            minimapCtx.fillStyle = "#111";
+            minimapCtx.fillRect(mini.x - 3, mini.y - 3, 6, 3);
+        }
+    });
+
+    document.querySelectorAll(".tack").forEach(tack => {
+        const mini = worldToMinimap(
+            tack.offsetLeft + tack.offsetWidth / 2,
+            tack.offsetTop + tack.offsetHeight / 2
+        );
+
+        minimapCtx.fillStyle = "#bbbbbb";
+        minimapCtx.beginPath();
+        minimapCtx.arc(mini.x, mini.y, 2, 0, Math.PI * 2);
+        minimapCtx.fill();
+    });
+}
+
+function drawMinimapPolaroid(x, y) {
+    const w = 10;
+    const h = 13;
+    const border = 2;
+
+    minimapCtx.fillStyle = "#f5f5f5";
+    minimapCtx.fillRect(x - w / 2, y - h / 2, w, h);
+
+    minimapCtx.fillStyle = "#111";
+    minimapCtx.fillRect(
+        x - w / 2 + border,
+        y - h / 2 + border,
+        w - border * 2,
+        w - border * 2
+    );
+}
+
+function drawMinimapCamera() {
+    const topLeft = screenToWorld(0, 0);
+    const bottomRight = screenToWorld(window.innerWidth, window.innerHeight);
+
+    const a = worldToMinimap(topLeft.x, topLeft.y);
+    const b = worldToMinimap(bottomRight.x, bottomRight.y);
+
+    minimapCtx.strokeStyle = "white";
+    minimapCtx.lineWidth = 2;
+    minimapCtx.strokeRect(a.x, a.y, b.x - a.x, b.y - a.y);
+}
+
+function worldToMinimap(x, y) {
+    return {
+        x: (x / WORLD_SIZE) * minimap.width,
+        y: (y / WORLD_SIZE) * minimap.height
+    };
+}
+
+function minimapToWorld(x, y) {
+    return {
+        x: (x / minimap.width) * WORLD_SIZE,
+        y: (y / minimap.height) * WORLD_SIZE
+    };
+}
+
 function showMenu(menu, x, y) {
     hideColorWheel();
 
-    menu.style.left = x + "px";
-    menu.style.top = y + "px";
     menu.style.display = "flex";
+
+    const padding = 8;
+    const rect = menu.getBoundingClientRect();
+
+    let finalX = x;
+    let finalY = y;
+
+    if (finalX + rect.width > window.innerWidth - padding) {
+        finalX = window.innerWidth - rect.width - padding;
+    }
+
+    if (finalY + rect.height > window.innerHeight - padding) {
+        finalY = window.innerHeight - rect.height - padding;
+    }
+
+    if (finalX < padding) finalX = padding;
+    if (finalY < padding) finalY = padding;
+
+    menu.style.left = finalX + "px";
+    menu.style.top = finalY + "px";
 }
 
 function hideContextMenu() {
